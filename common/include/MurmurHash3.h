@@ -78,7 +78,9 @@ typedef struct {
 
 FORCE_INLINE uint64_t getblock64 ( const uint64_t * p, int i )
 {
-  return p[i];
+  uint64_t res;
+  memcpy(&res, p + i, sizeof(res));
+  return res;
 }
 
 //-----------------------------------------------------------------------------
