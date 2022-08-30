@@ -19,7 +19,7 @@
 
 #include <var_opt_sketch.hpp>
 
-#include <catch.hpp>
+#include <catch2/catch.hpp>
 
 #include <vector>
 #include <string>
@@ -27,6 +27,7 @@
 #include <fstream>
 #include <cmath>
 #include <random>
+#include <stdexcept>
 
 #ifdef TEST_BINARY_INPUT_PATH
 static std::string testBinaryInputPath = TEST_BINARY_INPUT_PATH;

@@ -21,6 +21,7 @@
 
 namespace py = pybind11;
 
+// sketches
 void init_hll(py::module& m);
 void init_kll(py::module& m);
 void init_fi(py::module& m);
@@ -28,9 +29,14 @@ void init_cpc(py::module& m);
 void init_theta(py::module& m);
 void init_vo(py::module& m);
 void init_req(py::module& m);
+void init_quantiles(py::module& m);
 void init_vector_of_kll(py::module& m);
 
-PYBIND11_MODULE(datasketches, m) {
+// supporting objects
+void init_kolmogorov_smirnov(py::module& m);
+void init_serde(py::module& m);
+
+PYBIND11_MODULE(_datasketches, m) {
   init_hll(m);
   init_kll(m);
   init_fi(m);
@@ -38,5 +44,9 @@ PYBIND11_MODULE(datasketches, m) {
   init_theta(m);
   init_vo(m);
   init_req(m);
+  init_quantiles(m);
   init_vector_of_kll(m);
+
+  init_kolmogorov_smirnov(m);
+  init_serde(m);
 }

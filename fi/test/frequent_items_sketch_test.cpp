@@ -17,9 +17,10 @@
  * under the License.
  */
 
-#include <catch.hpp>
+#include <catch2/catch.hpp>
 #include <sstream>
 #include <fstream>
+#include <stdexcept>
 
 #include "frequent_items_sketch.hpp"
 

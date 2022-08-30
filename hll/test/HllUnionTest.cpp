@@ -17,14 +17,16 @@
  * under the License.
  */
 
-#include <catch.hpp>
+#include <catch2/catch.hpp>
 #include <sstream>
+#include <stdexcept>
 
 #include "hll.hpp"
 
 namespace datasketches {
 
 static void println(std::string& str) {
+  unused(str);
   //std::cout << str << "\n";
 }
 

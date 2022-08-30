@@ -72,21 +72,45 @@ public:
   double get_estimate() const;
 
   /**
-   * Returns the approximate lower error bound given a number of standard deviations.
-   * This parameter is similar to the number of standard deviations of the normal distribution
-   * and corresponds to approximately 67%, 95% and 99% confidence intervals.
-   * @param num_std_devs number of Standard Deviations (1, 2 or 3)
-   * @return the lower bound
-   */
-  double get_lower_bound(uint8_t num_std_devs) const;
+  * Returns the approximate lower error bound given a number of standard deviations over an arbitrary number of
+  * items stored in the sketch.
+  * This parameter is similar to the number of standard deviations of the normal distribution
+  * and corresponds to approximately 67%, 95% and 99% confidence intervals.
+  * @param num_std_devs number of Standard Deviations (1, 2 or 3)
+  * @param num_subset_entries number of items from {0, 1, ..., get_num_retained()} over which to estimate the bound
+  * @return the lower bound
+  */
+  double get_lower_bound(uint8_t num_std_devs, uint32_t num_subset_entries) const ;
 
   /**
-   * Returns the approximate upper error bound given a number of standard deviations.
-   * This parameter is similar to the number of standard deviations of the normal distribution
-   * and corresponds to approximately 67%, 95% and 99% confidence intervals.
-   * @param num_std_devs number of Standard Deviations (1, 2 or 3)
-   * @return the upper bound
-   */
+  * Returns the approximate lower error bound given a number of standard deviations.
+  * This parameter is similar to the number of standard deviations of the normal distribution
+  * and corresponds to approximately 67%, 95% and 99% confidence intervals.
+  * @param num_std_devs number of Standard Deviations (1, 2 or 3)
+  * @return the lower bound
+  */
+  double get_lower_bound(uint8_t num_std_devs) const;
+
+
+  /**
+  * Returns the approximate upper error bound given a number of standard deviations over an arbitrary number of
+  * items stored in the sketch.
+  * This parameter is similar to the number of standard deviations of the normal distribution
+  * and corresponds to approximately 67%, 95% and 99% confidence intervals.
+  * @param num_std_devs number of Standard Deviations (1, 2 or 3)
+  * @param num_subset_entries number of items from {0, 1, ..., get_num_retained()} over which to estimate the bound
+  * @return the lower bound
+  */
+  double get_upper_bound(uint8_t num_std_devs, uint32_t num_subset_entries) const ;
+
+
+  /**
+  * Returns the approximate upper error bound given a number of standard deviations.
+  * This parameter is similar to the number of standard deviations of the normal distribution
+  * and corresponds to approximately 67%, 95% and 99% confidence intervals.
+  * @param num_std_devs number of Standard Deviations (1, 2 or 3)
+  * @return the upper bound
+  */
   double get_upper_bound(uint8_t num_std_devs) const;
 
   /**
@@ -153,8 +177,7 @@ public:
   virtual const_iterator end() const = 0;
 
 protected:
-  using ostrstream = std::basic_ostringstream<char, std::char_traits<char>, AllocChar<Allocator>>;
-  virtual void print_specifics(ostrstream& os) const = 0;
+  virtual void print_specifics(std::ostringstream& os) const = 0;
 
   static uint16_t get_seed_hash(uint64_t seed);
 
@@ -326,6 +349,11 @@ public:
   void trim();
 
   /**
+   * Reset the sketch to the initial empty state
+   */
+  void reset();
+
+  /**
    * Converts this sketch to a compact sketch (ordered or unordered).
    * @param ordered optional flag to specify if ordered sketch should be produced
    * @return compact sketch
@@ -342,10 +370,9 @@ protected:
   tuple_map map_;
 
   // for builder
-  update_tuple_sketch(uint8_t lg_cur_size, uint8_t lg_nom_size, resize_factor rf, uint64_t theta, uint64_t seed, const Policy& policy, const Allocator& allocator);
+  update_tuple_sketch(uint8_t lg_cur_size, uint8_t lg_nom_size, resize_factor rf, float p, uint64_t theta, uint64_t seed, const Policy& policy, const Allocator& allocator);
 
-  using ostrstream = typename Base::ostrstream;
-  virtual void print_specifics(ostrstream& os) const;
+  virtual void print_specifics(std::ostringstream& os) const;
 };
 
 // compact sketch
@@ -367,9 +394,11 @@ public:
   using vector_bytes = std::vector<uint8_t, AllocBytes>;
   using comparator = compare_by_key<ExtractKey>;
 
-  static const uint8_t SERIAL_VERSION = 1;
+  static const uint8_t SERIAL_VERSION_LEGACY = 1;
+  static const uint8_t SERIAL_VERSION = 3;
   static const uint8_t SKETCH_FAMILY = 9;
-  static const uint8_t SKETCH_TYPE = 5;
+  static const uint8_t SKETCH_TYPE = 1;
+  static const uint8_t SKETCH_TYPE_LEGACY = 5;
   enum flags { IS_BIG_ENDIAN, IS_READ_ONLY, IS_EMPTY, IS_COMPACT, IS_ORDERED };
 
   // Instances of this type can be obtained:
@@ -393,9 +422,23 @@ public:
   virtual uint32_t get_num_retained() const;
   virtual uint16_t get_seed_hash() const;
 
+  /**
+   * This method serializes the sketch into a given stream in a binary form
+   * @param os output stream
+   * @param instance of a SerDe
+   */
   template<typename SerDe = serde<Summary>>
   void serialize(std::ostream& os, const SerDe& sd = SerDe()) const;
 
+  /**
+   * This method serializes the sketch as a vector of bytes.
+   * An optional header can be reserved in front of the sketch.
+   * It is a blank space of a given size.
+   * This header is used in Datasketches PostgreSQL extension.
+   * @param header_size_bytes space to reserve in front of the sketch
+   * @param instance of a SerDe
+   * @return serialized sketch as a vector of bytes
+   */
   template<typename SerDe = serde<Summary>>
   vector_bytes serialize(unsigned header_size_bytes = 0, const SerDe& sd = SerDe()) const;
 
@@ -409,6 +452,7 @@ public:
    * @param is input stream
    * @param seed the seed for the hash function that was used to create the sketch
    * @param instance of a SerDe
+   * @param instance of an Allocator
    * @return an instance of a sketch
    */
   template<typename SerDe = serde<Summary>>
@@ -421,6 +465,7 @@ public:
    * @param size the size of the array
    * @param seed the seed for the hash function that was used to create the sketch
    * @param instance of a SerDe
+   * @param instance of an Allocator
    * @return an instance of the sketch
    */
   template<typename SerDe = serde<Summary>>
@@ -473,8 +518,7 @@ protected:
     bool destroy_;
   };
 
-  using ostrstream = typename Base::ostrstream;
-  virtual void print_specifics(ostrstream& os) const;
+  virtual void print_specifics(std::ostringstream& os) const;
 
 };
 

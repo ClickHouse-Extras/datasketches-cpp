@@ -53,9 +53,7 @@ first_interesting_column(0),
 kxp(1 << lg_k),
 hip_est_accum(0)
 {
-  if (lg_k < CPC_MIN_LG_K || lg_k > CPC_MAX_LG_K) {
-    throw std::invalid_argument("lg_k must be >= " + std::to_string(CPC_MIN_LG_K) + " and <= " + std::to_string(CPC_MAX_LG_K) + ": " + std::to_string(lg_k));
-  }
+  check_lg_k(lg_k);
 }
 
 template<typename A>
@@ -383,7 +381,9 @@ void cpc_sketch_alloc<A>::refresh_kxp(const uint64_t* bit_matrix) {
 
 template<typename A>
 string<A> cpc_sketch_alloc<A>::to_string() const {
-  std::basic_ostringstream<char, std::char_traits<char>, AllocChar<A>> os;
+  // Using a temporary stream for implementation here does not comply with AllocatorAwareContainer requirements.
+  // The stream does not support passing an allocator instance, and alternatives are complicated.
+  std::ostringstream os;
   os << "### CPC sketch summary:" << std::endl;
   os << "   lg_k           : " << std::to_string(lg_k) << std::endl;
   os << "   seed hash      : " << std::hex << compute_seed_hash(seed) << std::dec << std::endl;
@@ -394,14 +394,14 @@ string<A> cpc_sketch_alloc<A>::to_string() const {
     os << "   HIP estimate   : " << hip_est_accum << std::endl;
     os << "   kxp            : " << kxp << std::endl;
   }
-  os << "   intresting col : " << std::to_string(first_interesting_column) << std::endl;
+  os << "   interesting col: " << std::to_string(first_interesting_column) << std::endl;
   os << "   table entries  : " << surprising_value_table.get_num_items() << std::endl;
   os << "   window         : " << (sliding_window.size() == 0 ? "not " : "") <<  "allocated" << std::endl;
   if (sliding_window.size() > 0) {
     os << "   window offset  : " << std::to_string(window_offset) << std::endl;
   }
   os << "### End sketch summary" << std::endl;
-  return os.str();
+  return string<A>(os.str().c_str(), sliding_window.get_allocator());
 }
 
 template<typename A>
@@ -679,6 +679,49 @@ cpc_sketch_alloc<A> cpc_sketch_alloc<A>::deserialize(const void* bytes, size_t s
   get_compressor<A>().uncompress(compressed, uncompressed, lg_k, num_coupons);
   return cpc_sketch_alloc(lg_k, num_coupons, first_interesting_column, std::move(uncompressed.table),
       std::move(uncompressed.window), has_hip, kxp, hip_est_accum, seed);
+}
+
+/*
+ * These empirical values for the 99.9th percentile of size in bytes were measured using 100,000
+ * trials. The value for each trial is the maximum of 5*16=80 measurements that were equally
+ * spaced over values of the quantity C/K between 3.0 and 8.0. This table does not include the
+ * worst-case space for the preamble, which is added by the function.
+ */
+static const uint8_t CPC_EMPIRICAL_SIZE_MAX_LGK = 19;
+static const size_t CPC_EMPIRICAL_MAX_SIZE_BYTES[]  = {
+    24,     // lg_k = 4
+    36,     // lg_k = 5
+    56,     // lg_k = 6
+    100,    // lg_k = 7
+    180,    // lg_k = 8
+    344,    // lg_k = 9
+    660,    // lg_k = 10
+    1292,   // lg_k = 11
+    2540,   // lg_k = 12
+    5020,   // lg_k = 13
+    9968,   // lg_k = 14
+    19836,  // lg_k = 15
+    39532,  // lg_k = 16
+    78880,  // lg_k = 17
+    157516, // lg_k = 18
+    314656  // lg_k = 19
+};
+static const double CPC_EMPIRICAL_MAX_SIZE_FACTOR = 0.6; // 0.6 = 4.8 / 8.0
+static const size_t CPC_MAX_PREAMBLE_SIZE_BYTES = 40;
+
+template<typename A>
+size_t cpc_sketch_alloc<A>::get_max_serialized_size_bytes(uint8_t lg_k) {
+  check_lg_k(lg_k);
+  if (lg_k <= CPC_EMPIRICAL_SIZE_MAX_LGK) return CPC_EMPIRICAL_MAX_SIZE_BYTES[lg_k - CPC_MIN_LG_K] + CPC_MAX_PREAMBLE_SIZE_BYTES;
+  const uint32_t k = 1 << lg_k;
+  return (int) (CPC_EMPIRICAL_MAX_SIZE_FACTOR * k) + CPC_MAX_PREAMBLE_SIZE_BYTES;
+}
+
+template<typename A>
+void cpc_sketch_alloc<A>::check_lg_k(uint8_t lg_k) {
+  if (lg_k < CPC_MIN_LG_K || lg_k > CPC_MAX_LG_K) {
+    throw std::invalid_argument("lg_k must be >= " + std::to_string(CPC_MIN_LG_K) + " and <= " + std::to_string(CPC_MAX_LG_K) + ": " + std::to_string(lg_k));
+  }
 }
 
 template<typename A>

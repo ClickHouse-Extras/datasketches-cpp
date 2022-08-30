@@ -21,7 +21,8 @@
 
 #include <exception>
 #include <sstream>
-#include <catch.hpp>
+#include <stdexcept>
+#include <catch2/catch.hpp>
 
 namespace datasketches {
 

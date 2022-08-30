@@ -25,6 +25,7 @@
 #include <cmath>
 #include <random>
 #include <algorithm>
+#include <stdexcept>
 
 #include "var_opt_sketch.hpp"
 #include "serde.hpp"
@@ -118,25 +119,6 @@ var_opt_sketch<T,S,A>::var_opt_sketch(const var_opt_sketch& other, bool as_sketc
       std::copy(other.marks_, other.marks_ + curr_items_alloc_, marks_);
     }
   }
-
-template<typename T, typename S, typename A>
-var_opt_sketch<T,S,A>::var_opt_sketch(T* data, double* weights, size_t len,
-    uint32_t k, uint64_t n, uint32_t h_count, uint32_t r_count, double total_wt_r, const A& allocator) :
-  k_(k),
-  h_(h_count),
-  m_(0),
-  r_(r_count),
-  n_(n),
-  total_wt_r_(total_wt_r),
-  rf_(DEFAULT_RESIZE_FACTOR),
-  curr_items_alloc_(len),
-  filled_data_(n > k),
-  allocator_(allocator),
-  data_(data),
-  weights_(weights),
-  num_marks_in_h_(0),
-  marks_(nullptr)
-  {}
 
 template<typename T, typename S, typename A>
 var_opt_sketch<T,S,A>::var_opt_sketch(var_opt_sketch&& other) noexcept :
@@ -311,8 +293,8 @@ var_opt_sketch<T,S,A>& var_opt_sketch<T,S,A>::operator=(var_opt_sketch&& other) 
 
 // implementation for fixed-size arithmetic types (integral and floating point)
 template<typename T, typename S, typename A>
-template<typename TT, typename std::enable_if<std::is_arithmetic<TT>::value, int>::type>
-size_t var_opt_sketch<T,S,A>::get_serialized_size_bytes() const {
+template<typename TT, typename SerDe, typename std::enable_if<std::is_arithmetic<TT>::value, int>::type>
+size_t var_opt_sketch<T,S,A>::get_serialized_size_bytes(const SerDe&) const {
   if (is_empty()) { return PREAMBLE_LONGS_EMPTY << 3; }
   size_t num_bytes = (r_ == 0 ? PREAMBLE_LONGS_WARMUP : PREAMBLE_LONGS_FULL) << 3;
   num_bytes += h_ * sizeof(double);    // weights
@@ -325,8 +307,8 @@ size_t var_opt_sketch<T,S,A>::get_serialized_size_bytes() const {
 
 // implementation for all other types
 template<typename T, typename S, typename A>
-template<typename TT, typename std::enable_if<!std::is_arithmetic<TT>::value, int>::type>
-size_t var_opt_sketch<T,S,A>::get_serialized_size_bytes() const {
+template<typename TT, typename SerDe, typename std::enable_if<!std::is_arithmetic<TT>::value, int>::type>
+size_t var_opt_sketch<T,S,A>::get_serialized_size_bytes(const SerDe& sd) const {
   if (is_empty()) { return PREAMBLE_LONGS_EMPTY << 3; }
   size_t num_bytes = (r_ == 0 ? PREAMBLE_LONGS_WARMUP : PREAMBLE_LONGS_FULL) << 3;
   num_bytes += h_ * sizeof(double);    // weights
@@ -335,13 +317,14 @@ size_t var_opt_sketch<T,S,A>::get_serialized_size_bytes() const {
   }
   // must iterate over the items
   for (auto it: *this)
-    num_bytes += S().size_of_item(it.first);
+    num_bytes += sd.size_of_item(it.first);
   return num_bytes;
 }
 
 template<typename T, typename S, typename A>
-std::vector<uint8_t, AllocU8<A>> var_opt_sketch<T,S,A>::serialize(unsigned header_size_bytes) const {
-  const size_t size = header_size_bytes + get_serialized_size_bytes();
+template<typename SerDe>
+std::vector<uint8_t, AllocU8<A>> var_opt_sketch<T,S,A>::serialize(unsigned header_size_bytes, const SerDe& sd) const {
+  const size_t size = header_size_bytes + get_serialized_size_bytes(sd);
   std::vector<uint8_t, AllocU8<A>> bytes(size, 0, allocator_);
   uint8_t* ptr = bytes.data() + header_size_bytes;
   uint8_t* end_ptr = ptr + size;
@@ -400,8 +383,8 @@ std::vector<uint8_t, AllocU8<A>> var_opt_sketch<T,S,A>::serialize(unsigned heade
     }
 
     // write the sample items, skipping the gap. Either h_ or r_ may be 0
-    ptr += S().serialize(ptr, end_ptr - ptr, data_, h_);
-    ptr += S().serialize(ptr, end_ptr - ptr, &data_[h_ + 1], r_);
+    ptr += sd.serialize(ptr, end_ptr - ptr, data_, h_);
+    ptr += sd.serialize(ptr, end_ptr - ptr, &data_[h_ + 1], r_);
   }
   
   size_t bytes_written = ptr - bytes.data();
@@ -413,7 +396,8 @@ std::vector<uint8_t, AllocU8<A>> var_opt_sketch<T,S,A>::serialize(unsigned heade
 }
 
 template<typename T, typename S, typename A>
-void var_opt_sketch<T,S,A>::serialize(std::ostream& os) const {
+template<typename SerDe>
+void var_opt_sketch<T,S,A>::serialize(std::ostream& os, const SerDe& sd) const {
   const bool empty = (h_ == 0) && (r_ == 0);
 
   const uint8_t preLongs = (empty ? PREAMBLE_LONGS_EMPTY
@@ -469,13 +453,19 @@ void var_opt_sketch<T,S,A>::serialize(std::ostream& os) const {
     }
 
     // write the sample items, skipping the gap. Either h_ or r_ may be 0
-    S().serialize(os, data_, h_);
-    S().serialize(os, &data_[h_ + 1], r_);
+    sd.serialize(os, data_, h_);
+    sd.serialize(os, &data_[h_ + 1], r_);
   }
 }
 
 template<typename T, typename S, typename A>
 var_opt_sketch<T,S,A> var_opt_sketch<T,S,A>::deserialize(const void* bytes, size_t size, const A& allocator) {
+  return deserialize(bytes, size, S(), allocator);
+}
+
+template<typename T, typename S, typename A>
+template<typename SerDe>
+var_opt_sketch<T,S,A> var_opt_sketch<T,S,A>::deserialize(const void* bytes, size_t size, const SerDe& sd, const A& allocator) {
   ensure_minimum_memory(size, 8);
   const char* ptr = static_cast<const char*>(bytes);
   const char* base = ptr;
@@ -559,10 +549,10 @@ var_opt_sketch<T,S,A> var_opt_sketch<T,S,A>::deserialize(const void* bytes, size
   items_deleter deleter(array_size, allocator);
   std::unique_ptr<T, items_deleter> items(A(allocator).allocate(array_size), deleter);
   
-  ptr += S().deserialize(ptr, end_ptr - ptr, items.get(), h);
+  ptr += sd.deserialize(ptr, end_ptr - ptr, items.get(), h);
   items.get_deleter().set_h(h); // serde didn't throw, so the items are now valid
   
-  ptr += S().deserialize(ptr, end_ptr - ptr, &(items.get()[h + 1]), r);
+  ptr += sd.deserialize(ptr, end_ptr - ptr, &(items.get()[h + 1]), r);
   items.get_deleter().set_r(r); // serde didn't throw, so the items are now valid
 
   return var_opt_sketch(k, h, (r > 0 ? 1 : 0), r, n, total_wt_r, rf, array_size, false,
@@ -571,6 +561,12 @@ var_opt_sketch<T,S,A> var_opt_sketch<T,S,A>::deserialize(const void* bytes, size
 
 template<typename T, typename S, typename A>
 var_opt_sketch<T,S,A> var_opt_sketch<T,S,A>::deserialize(std::istream& is, const A& allocator) {
+  return deserialize(is, S(), allocator);
+}
+
+template<typename T, typename S, typename A>
+template<typename SerDe>
+var_opt_sketch<T,S,A> var_opt_sketch<T,S,A>::deserialize(std::istream& is, const SerDe& sd, const A& allocator) {
   const auto first_byte = read<uint8_t>(is);
   uint8_t preamble_longs = first_byte & 0x3f;
   const resize_factor rf = static_cast<resize_factor>((first_byte >> 6) & 0x03);
@@ -640,10 +636,10 @@ var_opt_sketch<T,S,A> var_opt_sketch<T,S,A>::deserialize(std::istream& is, const
   items_deleter deleter(array_size, allocator);
   std::unique_ptr<T, items_deleter> items(A(allocator).allocate(array_size), deleter);
 
-  S().deserialize(is, items.get(), h); // aka &data_[0]
+  sd.deserialize(is, items.get(), h); // aka &data_[0]
   items.get_deleter().set_h(h); // serde didn't throw, so the items are now valid
 
-  S().deserialize(is, &(items.get()[h + 1]), r);
+  sd.deserialize(is, &(items.get()[h + 1]), r);
   items.get_deleter().set_r(r); // serde didn't throw, so the items are now valid
 
   if (!is.good())
@@ -731,8 +727,10 @@ void var_opt_sketch<T,S,A>::update(T&& item, double weight) {
 
 template<typename T, typename S, typename A>
 string<A> var_opt_sketch<T,S,A>::to_string() const {
-  std::basic_ostringstream<char, std::char_traits<char>, AllocChar<A>> os;
-  os << "### VarOpt SUMMARY: " << std::endl;
+  // Using a temporary stream for implementation here does not comply with AllocatorAwareContainer requirements.
+  // The stream does not support passing an allocator instance, and alternatives are complicated.
+  std::ostringstream os;
+  os << "### VarOpt SUMMARY:" << std::endl;
   os << "   k            : " << k_ << std::endl;
   os << "   h            : " << h_ << std::endl;
   os << "   r            : " << r_ << std::endl;
@@ -740,24 +738,28 @@ string<A> var_opt_sketch<T,S,A>::to_string() const {
   os << "   Current size : " << curr_items_alloc_ << std::endl;
   os << "   Resize factor: " << (1 << rf_) << std::endl;
   os << "### END SKETCH SUMMARY" << std::endl;
-  return os.str();
+  return string<A>(os.str().c_str(), allocator_);
 }
 
 template<typename T, typename S, typename A>
 string<A> var_opt_sketch<T,S,A>::items_to_string() const {
-  std::basic_ostringstream<char, std::char_traits<char>, AllocChar<A>> os;
+  // Using a temporary stream for implementation here does not comply with AllocatorAwareContainer requirements.
+  // The stream does not support passing an allocator instance, and alternatives are complicated.
+  std::ostringstream os;
   os << "### Sketch Items" << std::endl;
   int idx = 0;
   for (auto record : *this) {
     os << idx << ": " << record.first << "\twt = " << record.second << std::endl;
     ++idx;
   }
-  return os.str();
+  return string<A>(os.str().c_str(), allocator_);
 }
 
 template<typename T, typename S, typename A>
 string<A> var_opt_sketch<T,S,A>::items_to_string(bool print_gap) const {
-  std::basic_ostringstream<char, std::char_traits<char>, AllocChar<A>> os;
+  // Using a temporary stream for implementation here does not comply with AllocatorAwareContainer requirements.
+  // The stream does not support passing an allocator instance, and alternatives are complicated.
+  std::ostringstream os;
   os << "### Sketch Items" << std::endl;
   const uint32_t array_length = (n_ < k_ ? n_ : k_ + 1);
   for (uint32_t i = 0, display_idx = 0; i < array_length; ++i) {
@@ -774,7 +776,7 @@ string<A> var_opt_sketch<T,S,A>::items_to_string(bool print_gap) const {
       ++display_idx;
     }
   }
-  return os.str();
+  return string<A>(os.str().c_str(), allocator_);
 }
 
 template<typename T, typename S, typename A>
@@ -854,7 +856,8 @@ void var_opt_sketch<T,S,A>::update_light(O&& item, double weight, bool mark) {
 
   const uint32_t m_slot = h_; // index of the gap, which becomes the M region
   if (filled_data_) {
-    data_[m_slot] = std::forward<O>(item);
+    if (&data_[m_slot] != &item)
+      data_[m_slot] = std::forward<O>(item);
   } else {
     new (&data_[m_slot]) T(std::forward<O>(item));
     filled_data_ = true;
@@ -931,9 +934,10 @@ void var_opt_sketch<T,S,A>::decrease_k_by_1() {
     // first, slide the R zone to the left by 1, temporarily filling the gap
     const uint32_t old_gap_idx = h_;
     const uint32_t old_final_r_idx = (h_ + 1 + r_) - 1;
-    //if (old_final_r_idx != k_) throw std::logic_error("gadget in invalid state");
+    if (old_final_r_idx != k_) throw std::logic_error("gadget in invalid state");
     
     swap_values(old_final_r_idx, old_gap_idx);
+    filled_data_ = true; // we just filled the gap, and no need to check previous state
 
     // now we pull an item out of H; any item is ok, but if we grab the rightmost and then
     // reduce h_, the heap invariant will be preserved (and the gap will be restored), plus
@@ -1103,7 +1107,8 @@ template<typename T, typename S, typename A>
 template<typename O>
 void var_opt_sketch<T,S,A>::push(O&& item, double wt, bool mark) {
   if (filled_data_) {
-    data_[h_] = std::forward<O>(item);
+    if (&data_[h_] != &item)
+      data_[h_] = std::forward<O>(item);
   } else {
     new (&data_[h_]) T(std::forward<O>(item));
     filled_data_ = true;
@@ -1204,9 +1209,8 @@ void var_opt_sketch<T,S,A>::downsample_candidate_set(double wt_cands, uint32_t n
     weights_[j] = -1.0;
   }
 
-  // The next two lines work even when delete_slot == leftmost_cand_slot
+  // The next line works even when delete_slot == leftmost_cand_slot
   data_[delete_slot] = std::move(data_[leftmost_cand_slot]);
-  // cannot set data_[leftmost_cand_slot] to null since not uisng T*
 
   m_ = 0;
   r_ = num_cands - 1;
@@ -1677,23 +1681,13 @@ bool var_opt_sketch<T, S, A>::iterator::get_mark() const {
   return sk_->marks_ == nullptr ? false : sk_->marks_[idx_];
 }
 
-
-
-// ******************** MOVE TO COMMON UTILS AREA EVENTUALLY *********************
-
-namespace random_utils {
-  static std::random_device rd; // possibly unsafe in MinGW with GCC < 9.2
-  static std::mt19937_64 rand(rd());
-  static std::uniform_real_distribution<> next_double(0.0, 1.0);
-}
-
 /**
  * Checks if target sampling allocation is more than 50% of max sampling size.
  * If so, returns max sampling size, otherwise passes through target size.
  */
 template<typename T, typename S, typename A>
 uint32_t var_opt_sketch<T,S,A>::get_adjusted_size(uint32_t max_size, uint32_t resize_target) {
-  if (max_size - (resize_target << 1) < 0L) {
+  if (max_size < (resize_target << 1)) {
     return max_size;
   }
   return resize_target;

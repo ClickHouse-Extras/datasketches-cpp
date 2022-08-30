@@ -17,9 +17,11 @@
  * under the License.
  */
 
-#include <catch.hpp>
+#include <catch2/catch.hpp>
 
 #include "cpc_union.hpp"
+
+#include <stdexcept>
 
 namespace datasketches {
 

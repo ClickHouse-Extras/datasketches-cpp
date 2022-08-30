@@ -64,8 +64,8 @@ compact_theta_sketch compact_theta_sketch_deserialize(py::bytes skBytes, uint64_
   return compact_theta_sketch::deserialize(skStr.c_str(), skStr.length(), seed);
 }
 
-py::list theta_jaccard_sim_computation(const theta_sketch& sketch_a, const theta_sketch& sketch_b) {
-  return py::cast(theta_jaccard_similarity::jaccard(sketch_a, sketch_b));
+py::list theta_jaccard_sim_computation(const theta_sketch& sketch_a, const theta_sketch& sketch_b, uint64_t seed) {
+  return py::cast(theta_jaccard_similarity::jaccard(sketch_a, sketch_b, seed));
 }
 
 }
@@ -103,7 +103,7 @@ void init_theta(py::module &m) {
 
   py::class_<update_theta_sketch, theta_sketch>(m, "update_theta_sketch")
     .def(py::init(&dspy::update_theta_sketch_factory),
-         py::arg("lg_k")=update_theta_sketch::builder::DEFAULT_LG_K, py::arg("p")=1.0, py::arg("seed")=DEFAULT_SEED)
+         py::arg("lg_k")=theta_constants::DEFAULT_LG_K, py::arg("p")=1.0, py::arg("seed")=DEFAULT_SEED)
     .def(py::init<const update_theta_sketch&>())
     .def("update", (void (update_theta_sketch::*)(int64_t)) &update_theta_sketch::update, py::arg("datum"),
          "Updates the sketch with the given integral value")
@@ -127,7 +127,7 @@ void init_theta(py::module &m) {
 
   py::class_<theta_union>(m, "theta_union")
     .def(py::init(&dspy::theta_union_factory),
-         py::arg("lg_k")=update_theta_sketch::builder::DEFAULT_LG_K, py::arg("p")=1.0, py::arg("seed")=DEFAULT_SEED)
+         py::arg("lg_k")=theta_constants::DEFAULT_LG_K, py::arg("p")=1.0, py::arg("seed")=DEFAULT_SEED)
     .def("update", &theta_union::update<const theta_sketch&>, py::arg("sketch"),
          "Updates the union with the given sketch")
     .def("get_result", &theta_union::get_result, py::arg("ordered")=true,
@@ -153,18 +153,18 @@ void init_theta(py::module &m) {
   
   py::class_<theta_jaccard_similarity>(m, "theta_jaccard_similarity")
      .def_static("jaccard", &dspy::theta_jaccard_sim_computation,
-                 py::arg("sketch_a"), py::arg("sketch_b"),
+                 py::arg("sketch_a"), py::arg("sketch_b"), py::arg("seed")=DEFAULT_SEED,
                  "Returns a list with {lower_bound, estimate, upper_bound} of the Jaccard similarity between sketches")
      .def_static("exactly_equal", &theta_jaccard_similarity::exactly_equal<const theta_sketch&, const theta_sketch&>,
-                 py::arg("sketch_a"), py::arg("sketch_b"),
+                 py::arg("sketch_a"), py::arg("sketch_b"), py::arg("seed")=DEFAULT_SEED,
                  "Returns True if sketch_a and sketch_b are equivalent, otherwise False")
      .def_static("similarity_test", &theta_jaccard_similarity::similarity_test<const theta_sketch&, const theta_sketch&>,
-                 py::arg("actual"), py::arg("expected"), py::arg("threshold"),
+                 py::arg("actual"), py::arg("expected"), py::arg("threshold"), py::arg("seed")=DEFAULT_SEED,
                  "Tests similarity of an actual sketch against an expected sketch. Computers the lower bound of the Jaccard "
                  "index J_{LB} of the actual and expected sketches. If J_{LB} >= threshold, then the sketches are considered "
                  "to be similar sith a confidence of 97.7% and returns True, otherwise False.")
      .def_static("dissimilarity_test", &theta_jaccard_similarity::dissimilarity_test<const theta_sketch&, const theta_sketch&>,
-                 py::arg("actual"), py::arg("expected"), py::arg("threshold"),
+                 py::arg("actual"), py::arg("expected"), py::arg("threshold"), py::arg("seed")=DEFAULT_SEED,
                  "Tests dissimilarity of an actual sketch against an expected sketch. Computers the lower bound of the Jaccard "
                  "index J_{UB} of the actual and expected sketches. If J_{UB} <= threshold, then the sketches are considered "
                  "to be dissimilar sith a confidence of 97.7% and returns True, otherwise False.")            

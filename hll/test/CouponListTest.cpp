@@ -17,12 +17,13 @@
  * under the License.
  */
 
-#include <catch.hpp>
+#include <catch2/catch.hpp>
 #include <ostream>
 #include <sstream>
 #include <cmath>
 #include <string>
 #include <exception>
+#include <stdexcept>
 
 #include "hll.hpp"
 #include "CouponList.hpp"
@@ -31,6 +32,7 @@
 namespace datasketches {
 
 void println_string(std::string str) {
+  unused(str);
   //std::cout << str << std::endl;
 }
 

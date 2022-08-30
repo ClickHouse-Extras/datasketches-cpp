@@ -17,9 +17,11 @@
  * under the License.
  */
 
-#include <catch.hpp>
+#include <catch2/catch.hpp>
 
 #include <theta_intersection.hpp>
+
+#include <stdexcept>
 
 namespace datasketches {
 
@@ -168,6 +170,26 @@ TEST_CASE("theta intersection: estimation mode half overlap ordered", "[theta_in
   theta_intersection intersection;
   intersection.update(sketch1.compact());
   intersection.update(sketch2.compact());
+  compact_theta_sketch result = intersection.get_result();
+  REQUIRE_FALSE(result.is_empty());
+  REQUIRE(result.is_estimation_mode());
+  REQUIRE(result.get_estimate() == Approx(5000).margin(5000 * 0.02));
+}
+
+TEST_CASE("theta intersection: estimation mode half overlap ordered wrapped compact", "[theta_intersection]") {
+  update_theta_sketch sketch1 = update_theta_sketch::builder().build();
+  int value = 0;
+  for (int i = 0; i < 10000; i++) sketch1.update(value++);
+  auto bytes1 = sketch1.compact().serialize();
+
+  update_theta_sketch sketch2 = update_theta_sketch::builder().build();
+  value = 5000;
+  for (int i = 0; i < 10000; i++) sketch2.update(value++);
+  auto bytes2 = sketch2.compact().serialize();
+
+  theta_intersection intersection;
+  intersection.update(wrapped_compact_theta_sketch::wrap(bytes1.data(), bytes1.size()));
+  intersection.update(wrapped_compact_theta_sketch::wrap(bytes2.data(), bytes2.size()));
   compact_theta_sketch result = intersection.get_result();
   REQUIRE_FALSE(result.is_empty());
   REQUIRE(result.is_estimation_mode());
